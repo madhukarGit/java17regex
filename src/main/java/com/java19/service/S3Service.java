@@ -1,4 +1,4 @@
-package com.java19;
+package com.java19.service;
 
 import com.java19.domain.Customer;
 import org.apache.tomcat.util.json.JSONParser;
@@ -7,12 +7,17 @@ import org.json.JSONObject;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.PutItemResponse;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -23,6 +28,11 @@ public class S3Service {
 
     private static void readJsonS3() throws IOException {
         S3Client client = S3Client.builder().region(Region.US_EAST_1).build();
+
+        DynamoDbClient ddb = DynamoDbClient.builder()
+                .region(Region.US_EAST_1)
+                .build();
+
         ListObjectsRequest listObjectsRequest = ListObjectsRequest
                 .builder()
                 .bucket("retail-db-json-redshift")
@@ -68,7 +78,7 @@ public class S3Service {
         }
         List<Customer> customerList = new ArrayList<>();
         Customer customer = new Customer();
-        for(int i=0;i<2;i++){
+        for(int i=0;i<jsonArray.size();i++){
             String regexCust = """
                     [{][\".]customer_id\"[:](?<customerId>\\d{1,})\\b.*
                     ,\"customer_fname\":\"(?<customerFname>\\w+)\\b.*
@@ -117,6 +127,10 @@ public class S3Service {
             String val = jsonArray.get(i).toString();
             System.out.println("val is "+val);
             Matcher matcher = pattern1.matcher(val);
+
+            /*
+            * Dynamo DB insert into table
+            * */
             while(matcher.find()) {
                 System.out.println(matcher.group("customerId"));
                 System.out.println(matcher.group("customerFname"));
@@ -125,6 +139,16 @@ public class S3Service {
                 System.out.println(matcher.group("customerStreet"));
                 System.out.println(matcher.group("customerCity"));
                 System.out.println("..............");
+                String customerId = matcher.group("customerId");
+                String customerFname = matcher.group("customerFname");
+                String customerState = matcher.group("customerState");
+                String customerZipcode = matcher.group("customerZipcode");
+                String customerEmail = matcher.group("customerEmail");
+                String customerLname = matcher.group("customerLname");
+                String customerStreet = matcher.group("customerStreet");
+                String customerCity = matcher.group("customerCity");
+                putDynamoDBItems(customerId,customerFname,customerState,customerZipcode,customerEmail,
+                        customerLname,customerStreet,customerCity);
             }
 //            if(matcher.matches()){
 //                customer.setCustomerId(matcher.group("customerId"));
@@ -151,5 +175,34 @@ public class S3Service {
 
     public static void main(String[] args) throws IOException {
         readJsonS3();
+    }
+
+    private static DynamoDbClient dynamoDbClient(){
+        return DynamoDbClient.builder().region(Region.US_EAST_1).build();
+    }
+
+    public static void putDynamoDBItems(String customerId,String customerFname,String customerState,String customerZipcode,
+                                 String customerEmail,String customerLname,String customerStreet,String customerCity){
+        HashMap<String, AttributeValue> itemValues = new HashMap<>();
+        itemValues.put("customer_id",AttributeValue.builder().s(customerId).build());
+        itemValues.put("customer_fname",AttributeValue.builder().s(customerFname).build());
+        itemValues.put("customer_state",AttributeValue.builder().s(customerState).build());
+        itemValues.put("customer_zipcode",AttributeValue.builder().s(customerZipcode).build());
+        itemValues.put("customer_email",AttributeValue.builder().s(customerEmail).build());
+        itemValues.put("customer_lname",AttributeValue.builder().s(customerLname).build());
+        itemValues.put("customer_street",AttributeValue.builder().s(customerStreet).build());
+        itemValues.put("customer_city",AttributeValue.builder().s(customerCity).build());
+
+        PutItemRequest putItemRequest = PutItemRequest.builder()
+                .tableName("customer")
+                .item(itemValues)
+                .build();
+
+        try{
+            PutItemResponse putItemResponse = dynamoDbClient().putItem(putItemRequest);
+            System.out.println("customer "+putItemResponse.responseMetadata().requestId());
+        }catch (Exception e){
+            e.printStackTrace();
+        }
     }
 }
